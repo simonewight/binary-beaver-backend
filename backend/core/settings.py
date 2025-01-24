@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     
     # Local apps
     'bbprojects',
+    'django_filters',
 ]
 
 MIDDLEWARE = [
@@ -154,6 +155,23 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
     ],
+    'DEFAULT_FILTER_BACKENDS': [
+        'django_filters.rest_framework.DjangoFilterBackend',
+        'rest_framework.filters.SearchFilter',
+        'rest_framework.filters.OrderingFilter',
+    ],
+    'DEFAULT_PAGINATION_CLASS': 'bbprojects.pagination.StandardResultsSetPagination',
+    'PAGE_SIZE': 10,
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '100/day',      # Anonymous users: 100 requests per day
+        'user': '1000/day',     # Authenticated users: 1000 requests per day
+        'snippet_create': '100/day',  # Custom rate for creating snippets
+        'collection_create': '50/day', # Custom rate for creating collections
+    }
 }
 
 # Add JWT settings

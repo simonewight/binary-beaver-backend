@@ -6,6 +6,23 @@ from django.db import models
 from .models import Snippet, User, Collection
 from .serializers import SnippetSerializer, UserSerializer, CollectionSerializer
 from .permissions import IsOwnerOrReadOnly, IsUserOrReadOnly, IsPublicOrIsOwner
+from django_filters import rest_framework as filters
+from .filters import SnippetFilter, CollectionFilter
+from django.core.exceptions import ObjectDoesNotExist
+from .exceptions import (
+    SnippetNotAccessibleError,
+    CollectionNotAccessibleError,
+    ResourceNotFoundError,
+    DuplicateResourceError
+)
+from .utils import create_response, error_response
+from .pagination import StandardResultsSetPagination, CursorSetPagination
+from .validators import (
+    SnippetValidationSerializer,
+    CollectionValidationSerializer,
+    SnippetActionSerializer
+)
+from .throttling import SnippetCreateThrottle, CollectionCreateThrottle
 
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
@@ -13,6 +30,7 @@ class UserViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsUserOrReadOnly]
     filter_backends = [filters.SearchFilter]
     search_fields = ['username', 'location']
+    pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
         # Show only public profiles to anonymous users
@@ -40,10 +58,14 @@ class SnippetViewSet(viewsets.ModelViewSet):
         IsOwnerOrReadOnly,
         IsPublicOrIsOwner
     ]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [filters.DjangoFilterBackend, 
+                      filters.SearchFilter, 
+                      filters.OrderingFilter]
+    filterset_class = SnippetFilter
     search_fields = ['title', 'description', 'language']
-    ordering_fields = ['created_at', 'likes']
+    ordering_fields = ['created_at', 'likes', 'title']
     ordering = ['-created_at']
+    pagination_class = CursorSetPagination
 
     def get_queryset(self):
         queryset = Snippet.objects.all()
@@ -67,30 +89,93 @@ class SnippetViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)
 
+    def create(self, request, *args, **kwargs):
+        try:
+            # Validate request data
+            validator = SnippetValidationSerializer(data=request.data)
+            validator.is_valid(raise_exception=True)
+            
+            # Create snippet using validated data
+            serializer = self.get_serializer(data=validator.validated_data)
+            serializer.is_valid(raise_exception=True)
+            self.perform_create(serializer)
+            
+            return create_response(
+                data=serializer.data,
+                message='Snippet created successfully',
+                status_code=status.HTTP_201_CREATED
+            )
+        except serializers.ValidationError as e:
+            return error_response(
+                message='Validation error',
+                data=e.detail,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            return error_response(str(e))
+
+    def update(self, request, *args, **kwargs):
+        try:
+            instance = self.get_object()
+            serializer = self.get_serializer(instance, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            self.perform_update(serializer)
+            return create_response(
+                data=serializer.data,
+                message='Snippet updated successfully'
+            )
+        except Exception as e:
+            return error_response(str(e))
+
+    def destroy(self, request, *args, **kwargs):
+        try:
+            instance = self.get_object()
+            self.perform_destroy(instance)
+            return create_response(
+                message='Snippet deleted successfully',
+                status_code=status.HTTP_204_NO_CONTENT
+            )
+        except Exception as e:
+            return error_response(str(e))
+
     @action(detail=True, methods=['post'])
     def like(self, request, pk=None):
         if not request.user.is_authenticated:
-            return Response(
-                {'error': 'Authentication required'},
-                status=status.HTTP_401_UNAUTHORIZED
+            return error_response(
+                'Authentication required',
+                status_code=status.HTTP_401_UNAUTHORIZED
             )
             
-        snippet = self.get_object()
-        if snippet.likes.filter(id=request.user.id).exists():
-            snippet.likes.remove(request.user)
-            return Response({'status': 'unliked'})
-        else:
-            snippet.likes.add(request.user)
-            return Response({'status': 'liked'})
+        try:
+            snippet = self.get_object()
+            if snippet.likes.filter(id=request.user.id).exists():
+                snippet.likes.remove(request.user)
+                message = 'Snippet unliked successfully'
+            else:
+                snippet.likes.add(request.user)
+                message = 'Snippet liked successfully'
+                
+            return create_response(message=message)
+        except Exception as e:
+            return error_response(str(e))
+
+    def get_throttles(self):
+        if self.action == 'create':
+            return [SnippetCreateThrottle()]
+        return super().get_throttles()
 
 class CollectionViewSet(viewsets.ModelViewSet):
     queryset = Collection.objects.all()
     serializer_class = CollectionSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [filters.DjangoFilterBackend, 
+                      filters.SearchFilter, 
+                      filters.OrderingFilter]
+    filterset_class = CollectionFilter
     search_fields = ['name', 'description']
     ordering_fields = ['created_at', 'name']
     ordering = ['-created_at']
+    pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
         queryset = Collection.objects.all()
@@ -105,38 +190,79 @@ class CollectionViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)
 
+    def create(self, request, *args, **kwargs):
+        try:
+            # Validate request data
+            validator = CollectionValidationSerializer(data=request.data)
+            validator.is_valid(raise_exception=True)
+            
+            # Create collection using validated data
+            serializer = self.get_serializer(data=validator.validated_data)
+            serializer.is_valid(raise_exception=True)
+            self.perform_create(serializer)
+            
+            return create_response(
+                data=serializer.data,
+                message='Collection created successfully',
+                status_code=status.HTTP_201_CREATED
+            )
+        except serializers.ValidationError as e:
+            return error_response(
+                message='Validation error',
+                data=e.detail,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            return error_response(str(e))
+
     @action(detail=True, methods=['post'])
     def add_snippet(self, request, pk=None):
-        collection = self.get_object()
         try:
-            snippet_id = request.data.get('snippet_id')
-            snippet = Snippet.objects.get(id=snippet_id)
+            # Validate snippet_id
+            validator = SnippetActionSerializer(data=request.data)
+            validator.is_valid(raise_exception=True)
             
-            # Check if user has access to the snippet
+            collection = self.get_object()
+            snippet = Snippet.objects.get(id=validator.validated_data['snippet_id'])
+            
             if not snippet.is_public and snippet.owner != request.user:
-                return Response(
-                    {'error': 'Snippet not accessible'},
-                    status=status.HTTP_403_FORBIDDEN
-                )
+                raise SnippetNotAccessibleError()
+                
+            if collection.snippets.filter(id=snippet.id).exists():
+                raise DuplicateResourceError('Snippet already in collection')
                 
             collection.snippets.add(snippet)
-            return Response({'status': 'snippet added'})
-        except Snippet.DoesNotExist:
-            return Response(
-                {'error': 'Snippet not found'},
-                status=status.HTTP_404_NOT_FOUND
+            return create_response(message='Snippet added to collection successfully')
+            
+        except serializers.ValidationError as e:
+            return error_response(
+                message='Validation error',
+                data=e.detail,
+                status_code=status.HTTP_400_BAD_REQUEST
             )
+        except Snippet.DoesNotExist:
+            raise ResourceNotFoundError('Snippet not found')
+        except Exception as e:
+            return error_response(str(e))
 
     @action(detail=True, methods=['post'])
     def remove_snippet(self, request, pk=None):
         collection = self.get_object()
         try:
             snippet_id = request.data.get('snippet_id')
+            if not snippet_id:
+                raise ValueError('snippet_id is required')
+                
             snippet = collection.snippets.get(id=snippet_id)
             collection.snippets.remove(snippet)
-            return Response({'status': 'snippet removed'})
+            return create_response(message='Snippet removed from collection successfully')
+            
         except Snippet.DoesNotExist:
-            return Response(
-                {'error': 'Snippet not found in collection'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            raise ResourceNotFoundError('Snippet not found in collection')
+        except Exception as e:
+            return error_response(str(e))
+
+    def get_throttles(self):
+        if self.action == 'create':
+            return [CollectionCreateThrottle()]
+        return super().get_throttles()
