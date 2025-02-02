@@ -42,6 +42,7 @@ class UserViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get', 'patch'], permission_classes=[permissions.IsAuthenticated])
     def me(self, request):
         """Get or update the authenticated user's profile."""
+        print("Me endpoint called!")  # Debug print
         if request.method == 'GET':
             serializer = self.get_serializer(request.user)
             return Response(serializer.data)
@@ -53,11 +54,12 @@ class UserViewSet(viewsets.ModelViewSet):
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    @action(detail=False, methods=['get'], url_path='me/stats', permission_classes=[permissions.IsAuthenticated])
     def stats(self, request):
         """Get the authenticated user's stats."""
+        print("Stats endpoint called!")  # Debug print
         try:
-            print(f"Getting stats for user: {request.user.username}")  # Debug print
+            print(f"Getting stats for user: {request.user.username}")
             user = request.user
             stats = {
                 'snippets_count': user.snippets.count(),
@@ -65,20 +67,21 @@ class UserViewSet(viewsets.ModelViewSet):
                 'likes_received': sum(snippet.likes.count() for snippet in user.snippets.all()),
                 'likes_given': user.liked_snippets.count() if hasattr(user, 'liked_snippets') else 0,
             }
-            print(f"Stats: {stats}")  # Debug print
+            print(f"Stats calculated: {stats}")  # Debug print
             return Response(stats)
         except Exception as e:
-            print(f"Error getting stats: {str(e)}")  # For debugging
+            print(f"Error in stats: {str(e)}")  # Debug print
             return Response(
                 {"error": "Failed to get user stats"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    @action(detail=False, methods=['get'], url_path='me/activity', permission_classes=[permissions.IsAuthenticated])
     def activity(self, request):
         """Get the authenticated user's recent activity."""
+        print("Activity endpoint called!")  # Debug print
         try:
-            print(f"Getting activity for user: {request.user.username}")  # Debug print
+            print(f"Getting activity for user: {request.user.username}")
             user = request.user
             recent_snippets = user.snippets.order_by('-created_at')[:5]
             recent_collections = user.collections.order_by('-created_at')[:5]
@@ -87,10 +90,10 @@ class UserViewSet(viewsets.ModelViewSet):
                 'recent_snippets': SnippetSerializer(recent_snippets, many=True).data,
                 'recent_collections': CollectionSerializer(recent_collections, many=True).data,
             }
-            print(f"Activity data: {activity_data}")  # Debug print
+            print(f"Activity data prepared: {activity_data}")  # Debug print
             return Response(activity_data)
         except Exception as e:
-            print(f"Error getting activity: {str(e)}")  # For debugging
+            print(f"Error in activity: {str(e)}")  # Debug print
             return Response(
                 {"error": "Failed to get user activity"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
