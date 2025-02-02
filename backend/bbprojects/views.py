@@ -1,14 +1,16 @@
 from django.shortcuts import render
-from rest_framework import viewsets, permissions, status, filters
-from rest_framework.decorators import action
+from rest_framework import viewsets, permissions, status, filters, serializers
+from rest_framework.decorators import action, api_view, permission_classes, authentication_classes
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from django.db import models
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError, ObjectDoesNotExist
 from .models import Snippet, User, Collection
 from .serializers import SnippetSerializer, UserSerializer, CollectionSerializer
 from .permissions import IsOwnerOrReadOnly, IsUserOrReadOnly, IsPublicOrIsOwner
-from django_filters import rest_framework as filters
+from django_filters.rest_framework import DjangoFilterBackend
 from .filters import SnippetFilter, CollectionFilter
-from django.core.exceptions import ObjectDoesNotExist
 from .exceptions import (
     SnippetNotAccessibleError,
     CollectionNotAccessibleError,
@@ -28,27 +30,71 @@ class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsUserOrReadOnly]
-    filter_backends = [filters.SearchFilter]
+    filter_backends = [filters.SearchFilter, DjangoFilterBackend]
     search_fields = ['username', 'location']
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
-        # Show only public profiles to anonymous users
         if not self.request.user.is_authenticated:
             return User.objects.filter(is_public=True)
         return User.objects.all()
 
-    @action(detail=True, methods=['get'])
-    def snippets(self, request, pk=None):
-        user = self.get_object()
-        if user.is_public or request.user == user:
-            snippets = user.snippets.filter(
-                models.Q(is_public=True) | 
-                models.Q(owner=request.user)
-            )
-            serializer = SnippetSerializer(snippets, many=True, context={'request': request})
+    @action(detail=False, methods=['get', 'patch'], permission_classes=[permissions.IsAuthenticated])
+    def me(self, request):
+        """Get or update the authenticated user's profile."""
+        if request.method == 'GET':
+            serializer = self.get_serializer(request.user)
             return Response(serializer.data)
-        return Response(status=status.HTTP_403_FORBIDDEN)
+        
+        # PATCH request
+        serializer = self.get_serializer(request.user, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    def stats(self, request):
+        """Get the authenticated user's stats."""
+        try:
+            print(f"Getting stats for user: {request.user.username}")  # Debug print
+            user = request.user
+            stats = {
+                'snippets_count': user.snippets.count(),
+                'collections_count': user.collections.count(),
+                'likes_received': sum(snippet.likes.count() for snippet in user.snippets.all()),
+                'likes_given': user.liked_snippets.count() if hasattr(user, 'liked_snippets') else 0,
+            }
+            print(f"Stats: {stats}")  # Debug print
+            return Response(stats)
+        except Exception as e:
+            print(f"Error getting stats: {str(e)}")  # For debugging
+            return Response(
+                {"error": "Failed to get user stats"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    def activity(self, request):
+        """Get the authenticated user's recent activity."""
+        try:
+            print(f"Getting activity for user: {request.user.username}")  # Debug print
+            user = request.user
+            recent_snippets = user.snippets.order_by('-created_at')[:5]
+            recent_collections = user.collections.order_by('-created_at')[:5]
+
+            activity_data = {
+                'recent_snippets': SnippetSerializer(recent_snippets, many=True).data,
+                'recent_collections': CollectionSerializer(recent_collections, many=True).data,
+            }
+            print(f"Activity data: {activity_data}")  # Debug print
+            return Response(activity_data)
+        except Exception as e:
+            print(f"Error getting activity: {str(e)}")  # For debugging
+            return Response(
+                {"error": "Failed to get user activity"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 class SnippetViewSet(viewsets.ModelViewSet):
     queryset = Snippet.objects.all()
@@ -58,7 +104,7 @@ class SnippetViewSet(viewsets.ModelViewSet):
         IsOwnerOrReadOnly,
         IsPublicOrIsOwner
     ]
-    filter_backends = [filters.DjangoFilterBackend, 
+    filter_backends = [DjangoFilterBackend, 
                       filters.SearchFilter, 
                       filters.OrderingFilter]
     filterset_class = SnippetFilter
@@ -168,7 +214,7 @@ class CollectionViewSet(viewsets.ModelViewSet):
     queryset = Collection.objects.all()
     serializer_class = CollectionSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly]
-    filter_backends = [filters.DjangoFilterBackend, 
+    filter_backends = [DjangoFilterBackend, 
                       filters.SearchFilter, 
                       filters.OrderingFilter]
     filterset_class = CollectionFilter
@@ -266,3 +312,45 @@ class CollectionViewSet(viewsets.ModelViewSet):
         if self.action == 'create':
             return [CollectionCreateThrottle()]
         return super().get_throttles()
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@authentication_classes([])
+def reset_password(request):
+    try:
+        username = request.data.get('username')
+        new_password = request.data.get('new_password')
+        
+        if not username or not new_password:
+            return error_response(
+                message='Username and new password are required.',
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+            
+        try:
+            user = User.objects.get(username=username)
+        except User.DoesNotExist:
+            return error_response(
+                message='User not found.',
+                status_code=status.HTTP_404_NOT_FOUND
+            )
+
+        # Validate the new password
+        try:
+            validate_password(new_password, user)
+        except ValidationError as e:
+            return error_response(
+                message=e.messages[0],
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Set the new password
+        user.set_password(new_password)
+        user.save()
+
+        return create_response(
+            message='Password reset successful.',
+            status_code=status.HTTP_200_OK
+        )
+    except Exception as e:
+        return error_response(str(e))

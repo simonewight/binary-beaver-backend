@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User, Snippet, Collection
+from .models import Snippet, User, Collection
 from dj_rest_auth.registration.serializers import RegisterSerializer
 
 class CustomRegisterSerializer(RegisterSerializer):
@@ -18,9 +18,8 @@ class CustomRegisterSerializer(RegisterSerializer):
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'date_of_birth', 'bio', 
-                 'location', 'is_public', 'avatar', 'created_at')
-        read_only_fields = ('created_at',)
+        fields = ['id', 'username', 'email', 'bio', 'location', 'is_public', 'date_joined']
+        read_only_fields = ['id', 'username', 'email', 'date_joined']
 
 class SnippetSerializer(serializers.ModelSerializer):
     owner = UserSerializer(read_only=True)
@@ -55,4 +54,4 @@ class CollectionSerializer(serializers.ModelSerializer):
         read_only_fields = ('owner', 'created_at', 'updated_at')
 
     def get_snippet_count(self, obj):
-        return obj.snippets.count() 
+        return obj.snippets.count()
