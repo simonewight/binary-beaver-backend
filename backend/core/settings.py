@@ -129,8 +129,8 @@ AUTH_USER_MODEL = 'bbprojects.User'
 # CORS settings
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
-    "http://localhost:5173",  # For Vite
-    "https://code-blox.netlify.app",
+    "http://localhost:5173",
+    "https://codebloxapp.netlify.app",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
