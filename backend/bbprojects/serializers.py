@@ -3,17 +3,36 @@ from .models import Snippet, User, Collection
 from dj_rest_auth.registration.serializers import RegisterSerializer
 
 class CustomRegisterSerializer(RegisterSerializer):
-    date_of_birth = serializers.DateField(required=False)
-    bio = serializers.CharField(max_length=160, required=False)
-    location = serializers.CharField(max_length=100, required=False)
+    date_of_birth = serializers.DateField(required=False, allow_null=True)
+    bio = serializers.CharField(max_length=160, required=False, allow_blank=True)
+    location = serializers.CharField(max_length=100, required=False, allow_blank=True)
     is_public = serializers.BooleanField(default=True, required=False)
 
-    def custom_signup(self, request, user):
-        user.date_of_birth = self.validated_data.get('date_of_birth', '')
-        user.bio = self.validated_data.get('bio', '')
-        user.location = self.validated_data.get('location', '')
-        user.is_public = self.validated_data.get('is_public', True)
+    def get_cleaned_data(self):
+        data = super().get_cleaned_data()
+        data.update({
+            'date_of_birth': self.validated_data.get('date_of_birth', None),
+            'bio': self.validated_data.get('bio', ''),
+            'location': self.validated_data.get('location', ''),
+            'is_public': self.validated_data.get('is_public', True),
+        })
+        print("Cleaned data:", data)  # Debug print
+        return data
+
+    def save(self, request):
+        print("CustomRegisterSerializer save method called")  # Debug print
+        print("Validated data:", self.validated_data)  # Debug print
+        user = super().save(request)
+        cleaned_data = self.get_cleaned_data()
+        
+        user.bio = cleaned_data.get('bio', '')
+        user.location = cleaned_data.get('location', '')
+        user.date_of_birth = cleaned_data.get('date_of_birth')
+        user.is_public = cleaned_data.get('is_public', True)
         user.save()
+        
+        print("User after save - bio:", user.bio)  # Debug print
+        return user
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:

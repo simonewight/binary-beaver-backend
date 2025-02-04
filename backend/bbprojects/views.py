@@ -187,26 +187,32 @@ class SnippetViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return error_response(str(e))
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def like(self, request, pk=None):
-        if not request.user.is_authenticated:
-            return error_response(
-                'Authentication required',
-                status_code=status.HTTP_401_UNAUTHORIZED
-            )
-            
         try:
             snippet = self.get_object()
             if snippet.likes.filter(id=request.user.id).exists():
                 snippet.likes.remove(request.user)
                 message = 'Snippet unliked successfully'
+                is_liked = False
             else:
                 snippet.likes.add(request.user)
                 message = 'Snippet liked successfully'
+                is_liked = True
                 
-            return create_response(message=message)
+            return Response({
+                'success': True,
+                'message': message,
+                'data': {
+                    'is_liked': is_liked,
+                    'likes_count': snippet.likes.count()
+                }
+            }, status=status.HTTP_200_OK)
         except Exception as e:
-            return error_response(str(e))
+            return Response({
+                'success': False,
+                'message': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)
 
     def get_throttles(self):
         if self.action == 'create':
