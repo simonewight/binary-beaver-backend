@@ -162,3 +162,11 @@ node_modules/
 # Production
 build/
 dist/
+
+# Django specific
+staticfiles/
+*.pyc
+__pycache__/
+db.sqlite3
+.env
+.DS_Store
