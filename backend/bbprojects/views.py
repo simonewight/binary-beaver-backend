@@ -193,16 +193,12 @@ class SnippetViewSet(viewsets.ModelViewSet):
             snippet = self.get_object()
             if snippet.likes.filter(id=request.user.id).exists():
                 snippet.likes.remove(request.user)
-                message = 'Snippet unliked successfully'
                 is_liked = False
             else:
                 snippet.likes.add(request.user)
-                message = 'Snippet liked successfully'
                 is_liked = True
                 
             return Response({
-                'success': True,
-                'message': message,
                 'data': {
                     'is_liked': is_liked,
                     'likes_count': snippet.likes.count()
@@ -210,8 +206,7 @@ class SnippetViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({
-                'success': False,
-                'message': str(e)
+                'error': str(e)
             }, status=status.HTTP_400_BAD_REQUEST)
 
     def get_throttles(self):
